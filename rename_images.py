@@ -43,7 +43,6 @@ def recognize_faces(image_file, known_face_encodings, known_face_names):
     return recognized_names
 
 def normalize_and_convert_image(image_file):
-    # Extract the file extension
     _, file_extension = os.path.splitext(image_file)
 
     with Image.open(image_file) as full_image_path:
