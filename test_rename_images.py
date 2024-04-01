@@ -1,7 +1,7 @@
 import os
 import json
 from unittest.mock import patch, MagicMock
-from rename_images import PROMPT, load_known_faces, get_image_files, generate_new_name
+from rename_images import PROMPT, load_known_faces, get_image_files, generate_new_name, rename_images
 
 def test_load_known_faces():
     # Mock the file reading and pickle loading

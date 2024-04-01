@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 def setup_logger():
     class ColoredFormatter(logging.Formatter):
@@ -23,8 +24,16 @@ def setup_logger():
             formatter = logging.Formatter(f"{self.light_magenta}%(asctime)s{self.reset} - {log_fmt}%(levelname)s{self.reset} - {self.white}%(message)s{self.reset}", "%Y-%m-%d %H:%M:%S")
             return formatter.format(record)
 
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file_name = f"application_{timestamp}.log"
+
+    # Create a file handler with the timestamp-based name
+    file_handler = logging.FileHandler(log_file_name)
+    file_handler.setFormatter(ColoredFormatter())
+
     handler = logging.StreamHandler()
     handler.setFormatter(ColoredFormatter())
-    logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+    logging.basicConfig(level=logging.INFO, handlers=[handler, file_handler])
 
     return logging.getLogger()

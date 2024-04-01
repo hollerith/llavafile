@@ -9,12 +9,34 @@ import pickle
 import face_recognition
 import logging
 
+from datetime import datetime
 from PIL import Image
 from io import BytesIO
 from ollama import generate
 from logger_config import setup_logger
 
+# Setup logger
 logger = setup_logger()
+
+# Function to read processed file names from all log files except the current one
+def read_processed_files():
+    processed_files = set()
+    # Find all log files
+    log_files = glob.glob('application_*.log')
+    if log_files:
+        # Sort log files by creation time and exclude the most recent one
+        sorted_log_files = sorted(log_files, key=os.path.getctime)
+        most_recent_log_file = sorted_log_files[-1]
+        for log_file in sorted_log_files:
+            # Skip the most recent log file
+            if log_file == most_recent_log_file:
+                continue
+            with open(log_file, 'r') as log_file_content:
+                for line in log_file_content:
+                    if "Renaming from" in line:
+                        old_name = line.split("Renaming from")[1].split("to")[0].strip()
+                        processed_files.add(old_name)
+    return processed_files
 
 PROMPT = """
 ### User: Rename this image...
@@ -94,44 +116,68 @@ def generate_new_name(image_file, recognized_names):
 
     return filename, description
 
-def rename_images(source_dir, glob_pattern, threshold=3.6):
+def rename_images(source_dir, target_dir, glob_pattern, threshold=3.6):
     known_faces_file = 'known_faces.dat' # Hardcoded path to the known faces file
     known_face_encodings, known_face_names = load_known_faces(known_faces_file)
+
+    # Read processed file names from log files
+    processed_files = read_processed_files()
+
     for full_image_path in get_image_files(source_dir, glob_pattern):
         original_name = os.path.basename(full_image_path)
+
+        # Skip if the file has already been processed
+        if original_name in processed_files:
+            logger.info(f"Skipping {full_image_path} as it has already been processed.")
+            continue
+
         entropy = shannon_entropy(original_name)
         if entropy < threshold:
+            logger.info(f"Skipping {full_image_path} as name entropy {entropy} less than {threshold}")
             continue
 
         recognized_names = recognize_faces(full_image_path, known_face_encodings, known_face_names)
         if recognized_names:
-            logging.info(f"Known faces: {str(recognized_names)}")
+            logger.info(f"Known faces: {str(recognized_names)}")
 
         new_name, comment = generate_new_name(full_image_path, recognized_names)
         base_name = new_name
+        new_full_path = os.path.join(target_dir, base_name)
         count = 1
-        while os.path.exists(base_name):
+        while os.path.exists(new_full_path):
             base_name = f"{new_name[:-4]}_{count}{new_name[-4:]}"
+            new_full_path = os.path.join(target_dir, base_name)
             count += 1
 
-        shutil.copy(full_image_path, base_name)
+        shutil.copy(full_image_path, new_full_path)
 
-        # Add the old name, people and description as a comment to the new file using exiftool
+        # Extract month and year from the file's creation date
+        creation_time = os.path.getctime(full_image_path)
+        creation_date = datetime.fromtimestamp(creation_time)
+        month_year = creation_date.strftime("%B %Y")
+
+        # Add the old name, people, description, and month/year to the EXIF comment
         old_name = os.path.basename(full_image_path)
-        logging.info(f"Renaming from {old_name} to {new_name}")
+        logger.info(f"Renaming from {old_name} to {new_name}")
 
-        comment = f"-Comment=Filename:{old_name} People:{', '.join(recognized_names)} Details: {comment}"
-        logging.info(f"Comment: {comment}")
+        comment = f"-Comment=Filename:{old_name} People:{', '.join(recognized_names)} Details: {comment} Month/Year: {month_year}"
+        logger.info(f"Comment: {comment}")
 
-        result = subprocess.run(['exiftool', comment, base_name, '-overwrite_original'], capture_output=True, text=True)
-        logging.info(f"Exiftool: {base_name}: {result.stdout.strip()}")
+        result = subprocess.run(['exiftool', comment, new_full_path, '-overwrite_original'], capture_output=True, text=True)
+        logger.info(f"Exiftool: {base_name}: {result.stdout.strip()}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python script_name.py <source_directory> <glob_pattern> [threshold]")
+        print("Usage: python script_name.py <source_directory> <target_directory> <glob_pattern> [threshold]")
         sys.exit(1)
 
     source_dir = sys.argv[1]
-    glob_pattern = sys.argv[2]
-    threshold = float(sys.argv[3]) if len(sys.argv) > 3 else None
-    rename_images(source_dir, glob_pattern, threshold)
+    target_dir = sys.argv[2]
+    glob_pattern = sys.argv[3]
+    threshold = float(sys.argv[4]) if len(sys.argv) > 4 else None
+
+    args = [source_dir, target_dir, glob_pattern]
+    if threshold is not None:
+        args.append(threshold)
+
+    rename_images(*args)
